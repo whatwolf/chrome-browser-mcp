@@ -1,0 +1,25 @@
+[package]
+name = "autorunway-tauri-app"
+version = "1.0.0"
+description = "Autorunway desktop application"
+edition = "2021"
+rust-version = "1.75"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2.0"
+tauri-plugin-http = "2.0"
+tauri-plugin-shell = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+warp = "0.3"
+image = "0.24"
+base64 = "0.21"
+walkdir = "2.3"
+rfd = "0.14"
+chrono = "0.4"

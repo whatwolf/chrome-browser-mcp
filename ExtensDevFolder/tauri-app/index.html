@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autorunway</title>
+  <script>
+    // 等待Tauri API加载
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.__TAURI__) {
+        console.log('Tauri API loaded:', window.__TAURI__);
+      } else {
+        console.error('Tauri API not loaded');
+      }
+    });
+  </script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    
+    .app-container {
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .section {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: #45a049;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+      margin-right: 10px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: #2196F3;
+    }
+
+    input:focus + .slider {
+      box-shadow: 0 0 1px #2196F3;
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
+
+    .slider.round {
+      border-radius: 34px;
+    }
+
+    .slider.round:before {
+      border-radius: 50%;
+    }
+    
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #f0f0f0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    
+    .progress {
+      height: 100%;
+      background-color: #4CAF50;
+      width: 0%;
+      transition: width 0.3s;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <h1>Autorunway 桌面端</h1>
+    
+    <div class="section">
+      <button id="testApiBtn" class="btn btn-primary">测试API</button>
+      <button id="openFolderBtn" class="btn btn-primary">选择图片文件夹</button>
+      <p id="folderPath"></p>
+      <p id="imageCount"></p>
+    </div>
+
+    <div class="section">
+      <label class="switch">
+        <input type="checkbox" id="autoRunSwitch">
+        <span class="slider round"></span>
+      </label>
+      <span>允许自动运行</span>
+    </div>
+
+    <div class="section">
+      <label class="switch">
+        <input type="checkbox" id="autoCloseSwitch">
+        <span class="slider round"></span>
+      </label>
+      <span>发送完毕后自动关闭</span>
+    </div>
+
+    <div class="section">
+      <h3>状态</h3>
+      <p id="sentCount">已发送: 0 / 0</p>
+    </div>
+  </div>
+
+  <script>
+        // 等待Tauri API加载完成
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 检查Tauri API是否可用
+            if (window.__TAURI__ === undefined) {
+                console.error('Tauri API not available');
+                document.getElementById('folderPath').textContent = 'Tauri API不可用，请确保在Tauri环境中运行';
+                return;
+            }
+            
+            // 使用Tauri V2的方式获取invoke函数
+            const { invoke } = window.__TAURI__.core;
+            
+            // 绑定测试API按钮事件
+            document.getElementById('testApiBtn').addEventListener('click', async () => {
+                try {
+                    const result = await invoke('test_api');
+                    document.getElementById('folderPath').textContent = `API测试结果: ${result}`;
+                } catch (error) {
+                    console.error('API测试失败:', error);
+                    document.getElementById('folderPath').textContent = `API测试错误: ${error}`;
+                }
+            });
+            
+            // 绑定按钮事件
+            document.getElementById('openFolderBtn').addEventListener('click', async () => {
+                try {
+                    const result = await invoke('open_folder');
+                    document.getElementById('folderPath').textContent = `已选择文件夹: ${result.path}`;
+                    document.getElementById('imageCount').textContent = `图片数量: ${result.count}`;
+                    document.getElementById('sentCount').textContent = `已发送: 0 / ${result.count}`;
+                } catch (error) {
+                    console.error('打开文件夹失败:', error);
+                    document.getElementById('folderPath').textContent = `错误: ${error}`;
+                }
+            });
+            
+            // 监听Tauri事件来更新计数
+            const { listen } = window.__TAURI__.event;
+            await listen('sent-count-update', (event) => {
+                const data = event.payload;
+                document.getElementById('sentCount').textContent = `已发送: ${data.sent} / ${data.total}`;
+            });
+            
+            // 自动运行开关
+            document.getElementById('autoRunSwitch').addEventListener('change', async (e) => {
+                try {
+                    const enabled = e.target.checked;
+                    await invoke('set_auto_run', { enabled });
+                    console.log('自动运行设置:', enabled);
+                } catch (error) {
+                    console.error('设置自动运行失败:', error);
+                }
+            });
+            
+            // 自动关闭开关
+            document.getElementById('autoCloseSwitch').addEventListener('change', async (e) => {
+                try {
+                    const enabled = e.target.checked;
+                    await invoke('set_auto_close', { enabled });
+                    console.log('自动关闭设置:', enabled);
+                } catch (error) {
+                    console.error('设置自动关闭失败:', error);
+                }
+            });
+            
+            // 移除定期轮询，使用事件监听更新计数
+        });
+    </script>
+</body>
+</html>

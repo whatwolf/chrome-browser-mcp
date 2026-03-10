@@ -1,967 +1,644 @@
-class DOMObserver {
-  constructor() {
-    this.observers = new Map();
-    this.pendingCallbacks = new Map();
-  }
+// contents.js
+// 页面内容脚本
 
-  waitForElement(selector, options = {}) {
-    const timeout = options.timeout || 60000;
-    const existingElement = $(selector);
-
-    if (existingElement.length > 0) {
-      return Promise.resolve(existingElement);
-    }
-
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.stopWatching(selector);
-        reject(new Error(`等待元素超时: ${selector}`));
-      }, timeout);
-
-      this.pendingCallbacks.set(selector, { resolve, reject, timeoutId });
-
-      if (!this.observers.has(selector)) {
-        const observer = new MutationObserver((mutations) => {
-          const element = $(selector);
-          if (element.length > 0) {
-            const callback = this.pendingCallbacks.get(selector);
-            if (callback) {
-              clearTimeout(callback.timeoutId);
-              this.pendingCallbacks.delete(selector);
-              callback.resolve(element);
-              this.stopWatching(selector);
-            }
-          }
-        });
-
-        observer.observe($('body')[0], {
-          childList: true,
-          subtree: true
-        });
-
-        this.observers.set(selector, observer);
-      }
-    });
-  }
-
-  waitForElementWithCondition(selector, conditionFn, options = {}) {
-    const timeout = options.timeout || 60000;
-
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.stopWatching(selector);
-        reject(new Error(`等待条件超时: ${selector}`));
-      }, timeout);
-
-      const checkCondition = () => {
-        const element = $(selector);
-        if (element.length > 0 && conditionFn(element)) {
-          clearTimeout(timeoutId);
-          this.stopWatching(selector);
-          resolve(element);
-          return true;
-        }
-        return false;
-      };
-
-      if (checkCondition()) {
-        return;
-      }
-
-      const observer = new MutationObserver(() => {
-        checkCondition();
-      });
-
-      observer.observe($('body')[0], {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['disabled', 'data-soft-disabled', 'class']
-      });
-
-      this.observers.set(selector, observer);
-    });
-  }
-
-  waitForMultipleElements(selectors, options = {}) {
-    const timeout = options.timeout || 60000;
-    const results = {};
-    let resolved = 0;
-
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        this.stopWatchingAll();
-        reject(new Error('等待多个元素超时'));
-      }, timeout);
-
-      selectors.forEach(selector => {
-        this.waitForElement(selector, { timeout })
-          .then(element => {
-            results[selector] = element;
-            resolved++;
-            if (resolved === selectors.length) {
-              clearTimeout(timeoutId);
-              resolve(results);
-            }
-          })
-          .catch(reject);
-      });
-    });
-  }
-
-  watchForChanges(selector, callback, options = {}) {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach(mutation => {
-        callback(mutation);
-      });
-    });
-
-    const element = $(selector)[0];
-    if (element) {
-      observer.observe(element, {
-        childList: true,
-        subtree: true,
-        attributes: options.attributes || false,
-        attributeFilter: options.attributeFilter
-      });
-      this.observers.set(`watch_${selector}`, observer);
-    }
-
-    return observer;
-  }
-
-  stopWatching(key) {
-    const observer = this.observers.get(key);
-    if (observer) {
-      observer.disconnect();
-      this.observers.delete(key);
-    }
-    this.pendingCallbacks.delete(key);
-  }
-
-  stopWatchingAll() {
-    this.observers.forEach(observer => observer.disconnect());
-    this.observers.clear();
-    this.pendingCallbacks.clear();
-  }
-}
-
-window.domObserver = new DOMObserver();
-
-window.updateImageStats = async function () {
-  const statusDivImages = $('#statusDivImages');
-  if (statusDivImages.length === 0) {
-    return { total: 0, completed: 0 };
-  }
-
-  statusDivImages.css('cursor', 'pointer');
-  statusDivImages.attr('title', '点击清空数据库');
-  statusDivImages.off('click').on('click', async () => {
-    const stats = await window.imageManager.getStats();
-    if (stats.total === 0) {
-      return;
-    }
-
-    const confirmed = confirm(`确定要清空数据库吗？\n当前进度：${stats.completed}/${stats.total}`);
-    if (confirmed) {
-      await window.imageManager.clearAll();
-      await updateImageStats();
-      await window.logger.info('System', '数据库已清空');
-    }
-  });
-
-  try {
-    const stats = await window.imageManager.getStats();
-    statusDivImages.text(`图片：${stats.completed}/${stats.total}`);
-
-    await chrome.storage.local.set({ imageStats: stats });
-
-    return stats;
-  } catch (error) {
-    await window.logger.error('UI', '更新图片统计失败', error);
-    statusDivImages.text('图片：0/0');
-    return { total: 0, completed: 0 };
-  }
-};
-
-$(document).ready(async () => {
-  await window.logger.initDB();
-  await window.logger.info('System', '内容脚本已加载');
-
-  await window.configManager.init();
-  await window.logger.info('System', '配置已加载');
-
-  await window.concurrencyManager.init();
-  await window.logger.info('System', '并发控制器已初始化');
+$(document).ready(() => {
 
   const delFirstHeader = $('div[class^="unifiedHeader-"]');
   delFirstHeader.remove();
 
+  // 创建容器
   const container = $('<div class="autorunway-container"></div>');
 
-  const selectFolderBtn = $('<button class="autorunway-btn autorunway-btn-info">选择图片文件夹</button>');
+
+  // 创建请求图片按钮
   const getImageBtn = $('<button class="autorunway-btn autorunway-btn-secondary">贴入图片</button>');
-  const statusDivConnect = $('<div id="statusDivConnect" class="autorunway-status">状态：就绪</div>');
-  const statusDivAutoRun = $('<div id="statusDivAutoRun" class="autorunway-status">全自动：关闭</div>');
-  const statusDivImages = $('<div id="statusDivImages" class="autorunway-status">图片：0/0</div>');
-  const statusDivConcurrency = $('<div id="statusDivConcurrency" class="autorunway-status">并发：0/2</div>');
+
+
+
+  // 创建状态显示
+  const statusDivConnect = $('<div id="statusDivConnect" class="autorunway-status">状态: 未连接</div>');
+  const statusDivAutoRun = $('<div id="statusDivAutoRun" class="autorunway-status">状态: 未连接</div>');
+
+  // 创建generateIt按钮
   const generateItBtn = $('<button id="generateItBtn" class="autorunway-btn">Generate It</button>');
   const autoRunBtn = $('<button class="autorunway-btn autorunway-btn-secondary">自动运行</button>');
-  const retryFailedBtn = $('<button class="autorunway-btn autorunway-btn-warning">重试失败</button>');
 
-  window.concurrencyManager.subscribe((event, data) => {
-    if (event === 'acquired' || event === 'released' || event === 'buttonStateUpdated') {
-      const status = window.concurrencyManager.getStatus();
-      statusDivConcurrency.text(`并发：${status.active}/${status.max}`);
+  const $filename = $('<input type=hidden id="filename_for_tauri" value="">');
 
-      if (status.active >= status.max) {
-        statusDivConcurrency.css('color', '#dc3545');
-      } else if (status.active > 0) {
-        statusDivConcurrency.css('color', '#ffc107');
-      } else {
-        statusDivConcurrency.css('color', '');
-      }
-    }
-  });
 
-  selectFolderBtn.click(async () => {
-    try {
-      statusDivConnect.text('状态：选择中...');
-      await window.logger.info('User', '用户点击选择文件夹');
-      const success = await window.imageManager.selectFolder();
-      if (success) {
-        statusDivConnect.text('状态：文件夹已加载');
-        await updateImageStats();
-        await window.logger.info('Folder', '文件夹选择成功');
-      } else {
-        statusDivConnect.text('状态：选择失败');
-        await window.logger.error('Folder', '文件夹选择失败');
-      }
-    } catch (error) {
-      await window.logger.error('Folder', '选择文件夹异常', error);
-      statusDivConnect.text('状态：选择失败');
-    }
-  });
-
-  getImageBtn.click(async () => {
-    await window.logger.info('User', '用户点击贴入图片');
-    const success = await getImage();
-    if (success) {
-      await window.logger.info('Image', '图片上传成功');
-    } else {
-      await window.logger.warn('Image', '图片上传失败');
-    }
-  });
-
+  // 为generateIt按钮添加点击事件
   generateItBtn.click(async () => {
-    await window.logger.info('User', '用户点击 Generate It');
-    const success = await runSingleTask();
-    if (success) {
-      await window.logger.info('Task', '单次任务完成');
+    console.log('✅ Generate It按钮点击成功');
+
+    // 查找并点击文本输入框
+    if (await inputText()) {
+      console.log('✅ 文本输入框已输入');
     } else {
-      await window.logger.warn('Task', '单次任务失败');
+      console.log('⚠️ 文本输入框未输入');
+      return false;
     }
-  });
-
-  autoRunBtn.click(async () => {
-    const isAutoRunning = autoRunBtn.data('running') || false;
-
-    if (isAutoRunning) {
-      autoRunBtn.data('running', false);
-      autoRunBtn.text('自动运行');
-      statusDivAutoRun.text('全自动：关闭');
-      await window.logger.info('Automation', '自动运行已停止');
+    await awaitseconds(3);
+    if (await generatebuttonclick()) {
+      console.log('✅ Generate按钮点击成功');
     } else {
-      autoRunBtn.data('running', true);
-      autoRunBtn.text('停止运行');
-      statusDivAutoRun.text('全自动：运行中');
-      await window.logger.info('Automation', '自动运行已启动');
-      await autoRunway(autoRunBtn, statusDivAutoRun);
+      console.log('⚠️ Generate按钮点击失败');
+      return false;
     }
-  });
+    await awaitseconds(3);
+    if (await removeimage()) { //移除上传的图片
+      console.log('✅ 移除图片成功');
+    } else {
+      console.log('⚠️ 移除图片失败');
+      return false;
+    }
+    await awaitseconds(3);
 
-  retryFailedBtn.click(async () => {
-    await window.logger.info('User', '用户点击重试失败');
-    const result = await window.imageManager.retryFailedImages();
-    await window.logger.info('Retry', `重试结果: ${result.retried} 个可重试, ${result.maxRetriesReached} 个已达最大重试次数`);
-    await updateImageStats();
-    alert(`已重置 ${result.retried} 个失败任务\n${result.maxRetriesReached} 个任务已达最大重试次数`);
-  });
+    if (await await4kbuttonandclick()) {
+      console.log('✅ 4K按钮点击成功');
+    } else {
+      console.log('⚠️ 4K按钮点击失败');
+      return false;
+    }
 
-  container.append(selectFolderBtn);
+    if (await download4K()) {
+      console.log('✅ 点击4K下载成功');
+    } else {
+      console.log('⚠️ 点击4K下载失败');
+      return false;
+    }
+
+    if (await hidevideo()) { //删除4k视频
+      console.log('✅ 删除4k视频成功');
+    } else {
+      console.log('⚠️ 删除4k视频失败');
+      return false;
+    }
+
+    return true;
+  })
+
+  getImageBtn.click(() => { getImage() });
+  autoRunBtn.click(() => { autoRunway() });
+
+  // 添加元素到容器
   container.append(getImageBtn);
   container.append(generateItBtn);
   container.append(autoRunBtn);
-  container.append(retryFailedBtn);
+  container.append($filename);
+
+
+
   container.append(statusDivConnect);
   container.append(statusDivAutoRun);
-  container.append(statusDivImages);
-  container.append(statusDivConcurrency);
-
-  await window.logger.info('System', '尝试清理之前的视频');
+  console.log('尝试清理之前的视频');
   hidevideo();
-
+  // 添加到页面
   $('body').append(container);
 
-  await initAutorunway();
-});
+  // 尝试连接到tauri-app
+  console.log('[Content] 尝试连接到 Tauri 应用');
+  chrome.runtime.sendMessage({ action: 'connect' }, async (response) => {
+    console.log('[Content] 收到连接响应:', response);
+    if (response && response.success) {
+      statusDivConnect.text('状态: 已连接');
+    } else {
+      statusDivConnect.text('状态: 连接失败');
+      if (response && response.error) {
+        console.error('[Content] 连接错误详情:', response.error);
+      }
+    }
+  });
+  chrome.runtime.sendMessage({ action: 'auto-run' }, async (response) => {
+    console.log('[Content] 收到自动运行状态响应:', response);
+    if (response && response.success) {
+      console.log('[Content] 自动运行状态数据:', response.data);
+      const enabled = response.data.enabled;
+      if (enabled) {
+        statusDivAutoRun.text('全自动状态: 开启');
+        console.log('自动运行已开启');
+        console.log('等待界面加载');
+        await waitForElement('button:contains("Generate")', async () => {
+          console.log('界面加载完毕，准备开始....');
+          await awaitseconds(3);
+          await autoRunway();
 
-async function initAutorunway() {
-  await window.logger.info('System', '初始化...');
+        });
 
-  await window.imageManager.initDB();
 
-  const retryConfig = window.configManager.getRetryConfig();
-  window.imageManager.setRetryConfig(retryConfig);
-
-  const hasFolder = await window.imageManager.loadFolderHandle();
-
-  const stats = await window.imageManager.getStats();
-
-  if (stats.total > 0) {
-    await window.logger.info('System', `已有数据：${stats.completed}/${stats.total}`);
-    await updateImageStats();
-  }
-
-  if (hasFolder) {
-    $('#statusDivConnect').text('状态：文件夹已加载');
-
-    if (stats.total === 0) {
-      await window.logger.info('System', '数据库为空，开始扫描文件夹...');
-      try {
-        await window.imageManager.scanFolder();
-        await updateImageStats();
-        $('#statusDivConnect').text('状态：文件夹已扫描');
-      } catch (error) {
-        await window.logger.error('System', '扫描文件夹失败', error);
-        $('#statusDivConnect').text('状态：扫描失败，请重新选择');
+      } else {
+        statusDivAutoRun.text('全自动状态: 关闭');
       }
     } else {
-      await window.logger.info('System', `恢复进度：${stats.completed}/${stats.total}`);
-      await updateImageStats();
-      $('#statusDivConnect').text('状态：进度已恢复');
+      statusDivAutoRun.text('全自动状态: 未知');
+      if (response && response.error) {
+        console.error('[Content] 自动运行状态查询错误详情:', response.error);
+      }
     }
-  } else {
-    $('#statusDivConnect').text('状态：请选择文件夹');
-  }
-}
+  });
 
-async function awaitSeconds(seconds) {
-  await window.logger.debug('Timing', `等待 ${seconds} 秒`);
-  await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+
+});
+
+
+// 延时
+async function awaitseconds(seconds) {
+  for (let i = seconds; i > 0; i--) {
+    console.log(i);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
   return true;
 }
 
-async function waitForElementWithMutationObserver(selector, timeout = 60000) {
-  try {
-    const element = await window.domObserver.waitForElement(selector, { timeout });
-    return element;
-  } catch (error) {
-    await window.logger.error('DOM', `等待元素失败: ${selector}`, error);
-    return null;
+// 等待元素出现后执行函数
+async function waitForElement(elementSelector, callback, timeout = 60000) {
+  // 检查元素是否已经存在
+  const existingElement = $(elementSelector);
+  if (existingElement.length > 0) {
+    await callback();
+    return true;
   }
+
+  // 创建MutationObserver监听DOM变化
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      observer.disconnect();
+      resolve(false);
+    }, timeout);
+
+    const observer = new MutationObserver(async (mutations) => {
+      mutations.forEach(async (mutation) => {
+        if (mutation.addedNodes) {
+          for (let i = 0; i < mutation.addedNodes.length; i++) {
+            const node = mutation.addedNodes[i];
+            if (node.nodeType === 1) { // 元素节点
+              if ($(node).is(elementSelector)) {
+                clearTimeout(timer);
+                await callback();
+                observer.disconnect(); // 找到元素后停止监听
+                resolve(true);
+                return;
+              }
+              // 检查子节点
+              const child = $(node).find(elementSelector);
+              if (child.length > 0) {
+                clearTimeout(timer);
+                await callback();
+                observer.disconnect(); // 找到元素后停止监听
+                resolve(true);
+                return;
+              }
+            }
+          }
+        }
+      });
+    });
+
+    // 开始监听DOM变化
+    observer.observe($('body')[0], {
+      childList: true,
+      subtree: true
+    });
+  });
 }
 
-async function waitForButtonEnabled(selector, timeout = 300000) {
-  try {
-    const element = await window.domObserver.waitForElementWithCondition(
-      selector,
-      ($el) => {
-        const el = $el[0];
-        return el && !el.disabled && el.getAttribute('data-soft-disabled') !== 'true';
-      },
-      { timeout }
-    );
-    return element;
-  } catch (error) {
-    await window.logger.error('DOM', `等待按钮启用失败: ${selector}`, error);
-    return null;
-  }
-}
+
 
 async function modelchange() {
-  try {
-    await window.logger.info('Model', '开始切换模型');
-
-    const modelSelect = document.querySelector("select option[value='gen-4-turbo']")?.parentElement;
-
-    if (!modelSelect) {
-      await window.logger.warn('Model', '未找到模型选择器，跳过模型切换');
-      return true;
-    }
-
-    const currentValue = modelSelect.value;
-    if (currentValue === 'gen-4-turbo') {
-      await window.logger.info('Model', '已经是 Gen-4 Turbo，无需切换');
-      return true;
-    }
-
-    modelSelect.value = 'gen-4-turbo';
-    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
-
-    await window.logger.info('Model', '已切换到 Gen-4 Turbo');
-    return true;
-  } catch (error) {
-    await window.logger.error('Model', '切换模型失败', error);
-    return false;
+  console.log('[modelchange] 开始选择模型', new Date().toISOString());
+  const selector = $('[data-testid="select-base-model"]');
+  if (selector.length > 0) {
+    selector[0].click();
+    console.log('[modelchange] 点击模型选择', new Date().toISOString());
   }
+  await awaitseconds(1);
+  const gen4Option = Array.from(document.querySelectorAll('*')).find(el =>
+    el.textContent === 'Gen-4 Turbo' && el.getAttribute('role') === 'option'
+  );
+  if (gen4Option) {
+    gen4Option.click();
+    console.log('[modelchange] 点击Gen-4 Turbo', new Date().toISOString());
+  }
+  await awaitseconds(0.5);
+  $('div[class^="centerContainer"]').click();
+  await awaitseconds(0.5);
+  selector[0].click();
 }
 
-async function getImage() {
-  try {
-    await modelchange();
+async function getImage() {  //点击获取图片，检测是否成功，是否有crop，检测到Generate按钮，图片处理流程完成
+  console.log('[getImage] 开始执行', new Date().toISOString());
+  // 等待模型选择按钮出现后执行modelchange
+  await waitForElement('[data-testid="select-base-model"]', modelchange);
+  console.log('✅ 模型选择完成', new Date().toISOString());
+  console.log('✅ 获取图片按钮点击成功', new Date().toISOString());
 
-    const hasPermission = await window.imageManager.checkPermission();
-    if (!hasPermission) {
-      await window.logger.error('Permission', '文件夹权限已失效');
-      alert('文件夹权限已失效，请点击"选择图片文件夹"重新选择。');
-      return false;
-    }
+  return new Promise((resolve) => {
+    console.log('[getImage] 发送getImage请求到background', new Date().toISOString());
+    chrome.runtime.sendMessage({ action: 'getImage' }, async (response) => {
+      console.log('[getImage] 收到响应', new Date().toISOString(), response);
+      if (response.success) {
+        const data = response.data;
+        if (data.success) {
+          console.log('[getImage] 获取图片成功:', data.path, new Date().toISOString());
+          console.log('[getImage] base64长度:', data.base64?.length, new Date().toISOString());
 
-    const image = await window.imageManager.getNextPendingImage();
+          $('#filename_for_tauri').val(data.path);
 
-    if (!image) {
-      await window.logger.warn('Image', '没有待处理的图片');
-      alert('所有图片已处理完成！');
-      return false;
-    }
+          // 将base64数据转换为File对象
+          const base64Data = data.base64;
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'image/png' });
+          const file = new File([blob], data.path.split('\\').pop(), { type: 'image/png' });
 
-    await window.imageManager.markAsProcessing(image.name);
-    await updateImageStats();
+          // 尝试模拟拖入Open file picker区域
+          const filePicker = $('div[aria-label="Open file picker"]');
+          if (filePicker.length > 0) {
+            console.log('找到文件选择器区域，尝试模拟拖放');
 
-    await window.logger.info('Image', `正在处理图片：${image.name}`);
+            // 使用第一个成功的拖放目标
+            const dropTarget = filePicker[0];
+            console.log('使用拖放目标:', dropTarget.className || dropTarget.tagName);
 
-    const file = await image.fileHandle.getFile();
+            // 创建DataTransfer对象
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
 
-    const filePicker = $('div[aria-label="Open file picker"]');
-    if (filePicker.length === 0) {
-      await window.logger.error('DOM', '未找到文件选择器区域');
-      await window.imageManager.markAsFailed(image.name, '未找到文件选择器');
-      return false;
-    }
+            // 创建拖放事件
+            const dragEnterEvent = new DragEvent('dragenter', {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dataTransfer
+            });
 
-    const dropTarget = filePicker[0];
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
+            const dragOverEvent = new DragEvent('dragover', {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dataTransfer
+            });
 
-    const dragEnterEvent = new DragEvent('dragenter', {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer: dataTransfer
+            const dropEvent = new DragEvent('drop', {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dataTransfer
+            });
+
+            try {
+              // 触发拖放事件序列
+              dropTarget.dispatchEvent(dragEnterEvent);
+              dropTarget.dispatchEvent(dragOverEvent);
+              dropTarget.dispatchEvent(dropEvent);
+
+              console.log('拖放事件已触发');
+              await awaitseconds(1);
+              // 等待1秒后检测上传状态
+
+              // 轮询检查Generate按钮的disabled状态变化 开始
+              let pollInterval;
+              let timeoutId;
+
+              pollInterval = setInterval(() => {
+                const currentButton = $('button:has(svg.lucide-video):contains("Generate")');
+                if (currentButton.length > 0) {
+                  const isDisabled = currentButton[0].disabled || currentButton[0].getAttribute('data-soft-disabled') === 'true';
+                  if (!isDisabled) {
+                    console.log('✅ Generate按钮已启用，返回true');
+                    clearInterval(pollInterval);
+                    clearTimeout(timeoutId);
+                    resolve(true);
+                  }
+                }
+              }, 500); // 每500ms检查一次
+
+              // 设置超时，300秒后停止轮询
+              timeoutId = setTimeout(() => {
+                clearInterval(pollInterval);
+                console.log('⚠️ 轮询超时，返回false');
+                resolve(false);
+              }, 300000);
+              // 轮询检查Generate按钮的disabled状态变化 结束
+
+            } catch (error) {
+              console.error('拖放失败:', error);
+              resolve(false);
+            }
+          } else {
+            console.error('未找到文件选择器区域');
+            resolve(false);
+          }
+        } else {
+          console.log('没有可用图片');
+          resolve(false);
+        }
+      } else {
+        console.error('获取图片失败:', response.error);
+        resolve(false);
+      }
     });
+  });
+};
 
-    const dragOverEvent = new DragEvent('dragover', {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer: dataTransfer
-    });
-
-    const dropEvent = new DragEvent('drop', {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer: dataTransfer
-    });
-
-    dropTarget.dispatchEvent(dragEnterEvent);
-    dropTarget.dispatchEvent(dragOverEvent);
-    dropTarget.dispatchEvent(dropEvent);
-
-    await window.logger.info('Image', '拖放事件已触发');
-    await awaitSeconds(1);
-
-    const timingConfig = window.configManager.getTimingConfig();
-
-    try {
-      await waitForButtonEnabled('button:has(svg.lucide-video):contains("Generate")', timingConfig.generateTimeout * 1000);
-      await window.imageManager.markAsCompleted(image.name);
-      await updateImageStats();
-      await window.logger.info('Image', `图片上传成功：${image.name}`);
-      return true;
-    } catch (error) {
-      await window.logger.error('Image', '等待 Generate 按钮超时', error);
-      await window.imageManager.markAsFailed(image.name, '等待按钮超时');
-      await updateImageStats();
-      return false;
-    }
-
-  } catch (error) {
-    await window.logger.error('Image', '获取图片失败', error);
-    return false;
-  }
-}
-
+// 查找并点击文本输入框
 async function inputText() {
-  try {
-    const textInput = await waitForElementWithMutationObserver('textarea[aria-label="Prompt"]', 10000);
-
-    if (!textInput || textInput.length === 0) {
-      await window.logger.error('DOM', '未找到文本输入框');
-      return false;
-    }
-
+  const textInput = $('textarea[aria-label="Prompt"]');
+  if (textInput.length > 0) {
+    console.log('找到文本输入框，点击并输入内容');
     textInput.focus().click();
 
-    const promptText = window.configManager.getPrompt();
-    await window.logger.info('Prompt', `使用提示词：${promptText}`);
+    // 模拟用户输入
+    const textToInput = 'dramatic and cinematic motion';
 
+    // 使用原生DOM方法设置值，并触发事件
     const textareaElement = textInput[0];
-    textareaElement.focus();
-    textareaElement.value = promptText;
 
+    // 使用focus事件确保元素获得焦点
+    textareaElement.focus();
+
+    // 设置值
+    textareaElement.value = textToInput;
+
+    // 触发input事件，让React等框架识别变化
     const inputEvent = new Event('input', { bubbles: true });
     textareaElement.dispatchEvent(inputEvent);
 
+    // 触发change事件
     const changeEvent = new Event('change', { bubbles: true });
     textareaElement.dispatchEvent(changeEvent);
 
-    await window.logger.info('Prompt', '提示词已输入');
-    return true;
-  } catch (error) {
-    await window.logger.error('Prompt', '输入提示词失败', error);
-    return false;
+    console.log(`已输入文本: "${textToInput}"`);
+    return true
+  } else {
+    console.log('⚠️ 未找到文本输入框');
+    return false
   }
 }
+
 
 async function generatebuttonclick() {
-  let release = null;
-
-  try {
-    const status = window.concurrencyManager.getStatus();
-    if (!window.concurrencyManager.isAvailable()) {
-      await window.logger.warn('Concurrency', `运算并发已满 (${status.active}/${status.max})，等待中...`);
-    }
-
-    const result = await window.concurrencyManager.acquire('generate');
-    release = result.release;
-
-    const timingConfig = window.configManager.getTimingConfig();
-    await awaitSeconds(timingConfig.waitAfterUpload);
-
-    const generateButton = $('button:has(svg.lucide-video):contains("Generate")');
-    if (generateButton.length > 0 && !generateButton.attr('disabled')) {
-      generateButton[0].click();
-      await window.logger.info('Generate', 'Generate 按钮已点击');
-      return true;
-    }
-
-    await window.logger.error('DOM', '未找到 Generate 按钮或按钮不可用');
-    return false;
-  } catch (error) {
-    await window.logger.error('Generate', '点击 Generate 按钮失败', error);
-    return false;
-  } finally {
-    if (release) {
-      release();
-    }
+  awaitseconds(1);
+  // 等待一小段时间后点击Generate按钮
+  const generateButton = $('button:has(svg.lucide-video):contains("Generate")');
+  if (generateButton.length > 0) {
+    console.log('找到Generate按钮，点击执行生成');
+    generateButton[0].click();
+    return true;
   }
-}
-
-async function removeimage() {
-  try {
-    const removeButton = $('button[aria-label="Remove image"]');
-    if (removeButton.length > 0) {
-      removeButton[0].click();
-      await window.logger.info('Image', '图片已移除');
-      return true;
-    }
-
-    await window.logger.warn('DOM', '未找到 Remove image 按钮');
-    return false;
-  } catch (error) {
-    await window.logger.error('Image', '移除图片失败', error);
-    return false;
-  }
-}
-
-async function await4kbuttonandclick() {
-  let release = null;
-
-  try {
-    const status = window.concurrencyManager.getStatus();
-    if (!window.concurrencyManager.isAvailable()) {
-      await window.logger.warn('Concurrency', `运算并发已满 (${status.active}/${status.max})，等待中...`);
-    }
-
-    const result = await window.concurrencyManager.acquire('4k');
-    release = result.release;
-
-    await window.logger.info('4K', '等待 4K 按钮出现...');
-
-    const timingConfig = window.configManager.getTimingConfig();
-    const button4K = await waitForElementWithMutationObserver(
-      'button:has(svg.lucide-image-upscale):contains("4K")',
-      timingConfig.generateTimeout * 1000
-    );
-
-    if (button4K && button4K.length > 0 && !button4K.attr('disabled')) {
-      button4K[0].click();
-      await window.logger.info('4K', '4K 按钮已点击');
-      return true;
-    }
-
-    await window.logger.error('DOM', '未找到 4K 按钮或按钮不可用');
-    return false;
-  } catch (error) {
-    await window.logger.error('4K', '等待 4K 按钮失败', error);
-    return false;
-  } finally {
-    if (release) {
-      release();
-    }
-  }
-}
-
-async function isthere2download() {
-  try {
-    await window.logger.info('Download', '检查下载按钮...');
-
-    const downloadButton = $('button:has(svg.lucide.lucide-download)');
-    if (downloadButton.length >= 2) {
-      await window.logger.info('Download', `找到 ${downloadButton.length} 个下载按钮`);
-      return true;
-    }
-
-    const timingConfig = window.configManager.getTimingConfig();
-
-    try {
-      await window.domObserver.waitForElementWithCondition(
-        'button:has(svg.lucide.lucide-download)',
-        ($el) => $el.length >= 2,
-        { timeout: timingConfig.generateTimeout * 1000 }
-      );
-      await window.logger.info('Download', '下载按钮已就绪');
-      return true;
-    } catch (error) {
-      await window.logger.error('Download', '等待下载按钮超时');
-      return false;
-    }
-  } catch (error) {
-    await window.logger.error('Download', '检查下载按钮失败', error);
-    return false;
-  }
-}
-
-async function download4K() {
-  try {
-    const timingConfig = window.configManager.getTimingConfig();
-    await awaitSeconds(timingConfig.waitAfter4K);
-
-    await window.logger.info('Download', '开始下载 4K 视频');
-
-    const $dataitems = $('div[data-item-index]');
-    await window.logger.debug('Download', `找到 ${$dataitems.length} 个视频项`);
-
-    for (let i = 0; i < $dataitems.length; i++) {
-      const $item = $($dataitems[i]);
-      const $span4k = $item.find('span[class^="modelLabel-"]:contains("4K")');
-
-      if ($span4k.length > 0) {
-        await window.logger.info('Download', '找到 4K 视频');
-
-        const $video = $item.find('video');
-        if ($video.length > 0) {
-          const videoUrl = $video[0].src;
-          await window.logger.info('Download', `视频 URL: ${videoUrl}`);
-          await downloadVideo(videoUrl);
-          return true;
-        }
-      }
-    }
-
-    await window.logger.error('Download', '未找到 4K 视频');
-    return false;
-  } catch (error) {
-    await window.logger.error('Download', '下载 4K 视频失败', error);
-    return false;
-  }
-}
-
-async function downloadVideo(url, maxRetries = 3) {
-  let lastError = null;
-  const retryConfig = window.configManager.getRetryConfig();
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await window.logger.info('Download', `开始下载 (尝试 ${attempt}/${maxRetries})`);
-
-      const response = await fetch(url, {
-        method: 'GET',
-        credentials: 'include'
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const blob = await response.blob();
-
-      if (blob.size === 0) {
-        throw new Error('下载的文件大小为 0');
-      }
-
-      const downloadConfig = window.configManager.getDownloadConfig();
-      const timestamp = downloadConfig.includeTimestamp ? `_${Date.now()}` : '';
-      const random = downloadConfig.includeRandom ? `_${Math.random().toString(36).substring(2, 8)}` : '';
-      const filename = `${downloadConfig.filenamePrefix}${timestamp}${random}.mp4`;
-
-      const downloadUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = filename;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-
-      await window.logger.info('Download', `下载成功: ${filename} (${(blob.size / 1024 / 1024).toFixed(2)}MB)`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      return true;
-
-    } catch (error) {
-      lastError = error;
-      await window.logger.error('Download', `下载失败 (尝试 ${attempt}/${maxRetries})`, error);
-
-      if (attempt < maxRetries) {
-        const waitTime = window.imageManager.getRetryDelay(attempt - 1);
-        await window.logger.info('Download', `等待 ${waitTime / 1000} 秒后重试...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-      }
-    }
-  }
-
-  await window.logger.error('Download', `下载失败，已重试 ${maxRetries} 次`, lastError);
+  console.log('找到Generate按钮，点击执行生成');
   return false;
 }
+async function removeimage() {
+  // 点击Remove image按钮移除图片
+  const removeButton = $('button[aria-label="Remove image"]');
+  if (removeButton.length > 0) {
+    console.log('✅ 找到Remove image按钮，点击移除图片');
+    removeButton[0].click();
+    return true;
+  } else {
+    console.log('⚠️ 未找到Remove image按钮');
+    return false;
+  }
+}
 
-async function hidevideo() {
-  try {
-    const timingConfig = window.configManager.getTimingConfig();
-    await awaitSeconds(timingConfig.waitAfterRemove);
 
-    const hideButtons = $('button[aria-label="Hide output"]');
-    hideButtons.each(function () {
-      $(this).click();
+
+async function await4kbuttonandclick() {
+  console.log('开始等待4K按钮出现...');
+
+  const buttonClicked = await new Promise((resolve) => {
+    const checkInterval = setInterval(() => {
+      const button4K = Array.from(document.querySelectorAll('button')).find(btn =>
+        btn.querySelector('svg.lucide-image-upscale') && btn.textContent.includes('4K')
+      );
+      if (button4K) {
+        clearInterval(checkInterval);
+        button4K.click();
+        console.log('✅ 找到4K按钮，点击');
+        resolve(true);
+      }
+    }, 500);
+
+    setTimeout(() => {
+      clearInterval(checkInterval);
+      console.log('⚠️ 4K按钮等待超时');
+      resolve(false);
+    }, 180000);
+  });
+
+  return buttonClicked;
+}
+
+
+
+async function download4K() {      //点击4K下载
+  console.log('开始等待4K视频card出现...');
+
+  const cardFound = await new Promise((resolve) => {
+    const checkInterval = setInterval(() => {
+      const span4k = Array.from(document.querySelectorAll('span[data-show="true"]')).find(el =>
+        el.textContent.includes('4K')
+      );
+      if (span4k) {
+        clearInterval(checkInterval);
+        console.log('4K视频card出现,等待4K生成完成...');
+        resolve(true);
+      }
+    }, 500);
+
+    setTimeout(() => {
+      clearInterval(checkInterval);
+      console.log('⚠️ 未找到4K视频card');
+      resolve(false);
+    }, 180000);
+  });
+
+  if (!cardFound) {
+    console.log('⚠️ 未找到4K视频card');
+    return false;
+  }
+
+  const toolbarFound = await new Promise((resolve) => {
+    const checkToolbar = setInterval(() => {
+      const span4k = Array.from(document.querySelectorAll('span[data-show="true"]')).find(el =>
+        el.textContent.includes('4K')
+      );
+      if (!span4k) return;
+
+      const card = span4k.closest('div[data-output-mode="video"]');
+      if (!card) return;
+
+      const toolbar = card.querySelector('div[role="toolbar"]');
+      const downloadBtn = card.querySelector('button.mainButton-_m_ZJD svg.lucide-download')?.closest('button.mainButton-_m_ZJD');
+
+      if (toolbar && downloadBtn) {
+        clearInterval(checkToolbar);
+        console.log('4K视频card生成完成,点击下载按钮...');
+        downloadBtn.click();
+        console.log('✅ 已点击4K下载按钮');
+        resolve(true);
+      }
+    }, 500);
+
+    setTimeout(() => {
+      clearInterval(checkToolbar);
+      console.log('⚠️ 4K视频生成等待超时');
+      resolve(false);
+    }, 180000);
+  });
+
+  return toolbarFound || false;
+}
+
+
+
+
+
+async function hidevideo() { //删除4k视频
+  //删除4k视频
+  await awaitseconds(3);
+  console.log('删除视频');
+  console.log('开始查找关闭按钮元素...');
+  $('button[aria-label="Hide output"]').each(async function () {
+    $(this).click()
+  });
+  return true
+}
+
+
+
+// 直接下载视频
+async function downloadVideo(url) {
+  return new Promise((resolve, reject) => {
+    console.log('开始下载视频:', url);
+
+    const imagePath = $('#filename_for_tauri').val();
+    let basename = imagePath ? imagePath.split(/[/\\]/).pop() : `video_${Date.now()}`;
+    basename = basename.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+    const filename = `${basename}.mp4`;
+
+    chrome.runtime.sendMessage({
+      action: 'downloadVideo',
+      url: url,
+      filename: filename
+    }, (response) => {
+      if (response && response.success) {
+        console.log('✅ 下载已创建, ID:', response.downloadId);
+
+        window._downloadResolve = resolve;
+        window._downloadReject = reject;
+        window._downloadId = response.downloadId;
+      } else {
+        console.error('❌ 下载创建失败:', response?.error);
+        reject(new Error(response?.error || '下载创建失败'));
+      }
+
     });
+  });
+}
 
-    await window.logger.info('Video', `已隐藏 ${hideButtons.length} 个视频`);
-    return true;
-  } catch (error) {
-    await window.logger.error('Video', '隐藏视频失败', error);
+// 监听下载完成消息
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'downloadComplete') {
+    console.log('📥 下载完成通知:', message.filename);
+    if (window._downloadResolve) {
+      window._downloadResolve(true);
+      window._downloadResolve = null;
+      window._downloadReject = null;
+
+      const filename = $('#filename_for_tauri').val();
+      if (filename) {
+        console.log('📝 通知Tauri标记已下载:', filename);
+        chrome.runtime.sendMessage({
+          action: 'markDownloaded',
+          path: filename
+        });
+      }
+      $('#filename_for_tauri').val('');
+    }
+  } else if (message.action === 'downloadError') {
+    console.error('📥 下载失败通知:', message.error);
+    if (window._downloadReject) {
+      window._downloadReject(new Error(message.error));
+      window._downloadResolve = null;
+      window._downloadReject = null;
+    }
+    $('#filename_for_tauri').val('');
+  }
+});
+//$('button[data-saved="false"]').click() //点击下载
+//$('span:contains("4K")').parent().click() //点击4K
+async function runOnce() {
+  if (await getImage()) {
+    console.log('✅ 获取图片成功');
+  } else {
+    console.log('⚠️ 获取图片失败');
     return false;
   }
-}
+  await awaitseconds(3);
 
-async function runSingleTask() {
-  const timingConfig = window.configManager.getTimingConfig();
+  console.log('✅ Generate It按钮点击成功');
 
-  try {
-    if (!await getImage()) {
-      await window.logger.error('Task', '获取图片失败');
-      return false;
-    }
-
-    await awaitSeconds(timingConfig.waitAfterUpload);
-
-    if (!await inputText()) {
-      await window.logger.error('Task', '输入提示词失败');
-      return false;
-    }
-
-    await awaitSeconds(timingConfig.waitAfterUpload);
-
-    if (!await generatebuttonclick()) {
-      await window.logger.error('Task', '点击 Generate 按钮失败');
-      return false;
-    }
-
-    await awaitSeconds(timingConfig.waitAfterGenerate);
-
-    if (!await removeimage()) {
-      await window.logger.warn('Task', '移除图片失败');
-    }
-
-    await awaitSeconds(timingConfig.waitAfterRemove);
-
-    if (!await await4kbuttonandclick()) {
-      await window.logger.error('Task', '点击 4K 按钮失败');
-      return false;
-    }
-
-    if (!await isthere2download()) {
-      await window.logger.error('Task', '下载按钮未就绪');
-      return false;
-    }
-
-    if (!await download4K()) {
-      await window.logger.error('Task', '下载 4K 视频失败');
-      return false;
-    }
-
-    if (!await hidevideo()) {
-      await window.logger.warn('Task', '隐藏视频失败');
-    }
-
-    await window.logger.info('Task', '单次任务完成');
-    return true;
-
-  } catch (error) {
-    await window.logger.error('Task', '单次任务异常', error);
+  // 查找并点击文本输入框
+  if (await inputText()) {
+    console.log('✅ 文本输入框已输入');
+  } else {
+    console.log('⚠️ 文本输入框未输入');
     return false;
   }
-}
+  await awaitseconds(3);
+  if (await generatebuttonclick()) {
+    console.log('✅ Generate按钮点击成功');
+  } else {
+    console.log('⚠️ Generate按钮点击失败');
+    return false;
+  }
+  await awaitseconds(3);
+  if (await removeimage()) { //移除上传的图片
+    console.log('✅ 移除图片成功');
+  } else {
+    console.log('⚠️ 移除图片失败');
+    return false;
+  }
+  await awaitseconds(3);
 
-async function autoRunway(autoRunBtn, statusDivAutoRun) {
-  const automationConfig = window.configManager.getAutomationConfig();
-  let consecutiveErrors = 0;
-
-  await window.logger.info('Automation', '开始自动运行', automationConfig);
-
-  while (autoRunBtn.data('running')) {
-    const stats = await window.imageManager.getStats();
-
-    if (stats.pending === 0) {
-      await window.logger.info('Automation', '所有任务已完成');
-      autoRunBtn.data('running', false);
-      autoRunBtn.text('自动运行');
-      statusDivAutoRun.text('全自动：已完成');
-      break;
-    }
-
-    const success = await runSingleTask();
-
-    if (success) {
-      consecutiveErrors = 0;
-      await window.logger.info('Automation', `任务成功，剩余 ${stats.pending - 1} 个任务`);
-    } else {
-      consecutiveErrors++;
-      await window.logger.error('Automation', `任务失败，连续错误数: ${consecutiveErrors}`);
-
-      if (automationConfig.stopOnError && consecutiveErrors >= automationConfig.maxConsecutiveErrors) {
-        await window.logger.error('Automation', `连续错误达到 ${automationConfig.maxConsecutiveErrors} 次，停止自动运行`);
-        autoRunBtn.data('running', false);
-        autoRunBtn.text('自动运行');
-        statusDivAutoRun.text('全自动：错误停止');
-        break;
-      }
-    }
-
-    if (automationConfig.pauseBetweenTasks > 0) {
-      await awaitSeconds(automationConfig.pauseBetweenTasks);
-    }
+  if (await await4kbuttonandclick()) {
+    console.log('✅ 4K按钮点击成功');
+  } else {
+    console.log('⚠️ 4K按钮点击失败');
+    return false;
   }
 
-  await window.logger.info('Automation', '自动运行结束');
-}
+  if (await download4K()) {
+    console.log('✅ 点击4K下载成功');
+  } else {
+    console.log('⚠️ 点击4K下载失败');
+    return false;
+  }
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  (async () => {
-    try {
-      await window.logger.info('Message', `收到消息: ${request.action}`);
-
-      switch (request.action) {
-        case 'selectNewFolder':
-          const success = await window.imageManager.selectFolder();
-          if (success) {
-            await window.imageManager.scanFolder();
-            await updateImageStats();
-          }
-          sendResponse({ success });
-          break;
-
-        case 'resetAll':
-          const count = await window.imageManager.resetAll();
-          await updateImageStats();
-          sendResponse({ success: true, count });
-          break;
-
-        case 'clearAll':
-          await window.imageManager.clearAll();
-          await updateImageStats();
-          sendResponse({ success: true });
-          break;
-
-        case 'retryFailed':
-          const result = await window.imageManager.retryFailedImages();
-          await updateImageStats();
-          sendResponse({ success: true, ...result });
-          break;
-
-        case 'getStats':
-          const stats = await window.imageManager.getStats();
-          sendResponse({ success: true, stats });
-          break;
-
-        case 'getDetailedStats':
-          const detailedStats = await window.imageManager.getDetailedStats();
-          sendResponse({ success: true, stats: detailedStats });
-          break;
-
-        case 'getLogs':
-          const logs = await window.logger.getLogs(request.options || {});
-          sendResponse({ success: true, logs });
-          break;
-
-        case 'clearLogs':
-          await window.logger.clear();
-          sendResponse({ success: true });
-          break;
-
-        case 'getConfig':
-          const config = window.configManager.config;
-          sendResponse({ success: true, config });
-          break;
-
-        case 'setConfig':
-          if (request.key && request.value !== undefined) {
-            await window.configManager.set(request.key, request.value);
-            sendResponse({ success: true });
-          } else {
-            sendResponse({ success: false, error: '缺少参数' });
-          }
-          break;
-
-        case 'resetConfig':
-          await window.configManager.reset();
-          sendResponse({ success: true });
-          break;
-
-        case 'getConcurrencyStatus':
-          const concurrencyStatus = window.concurrencyManager.getStatus();
-          sendResponse({ success: true, status: concurrencyStatus });
-          break;
-
-        case 'resetConcurrency':
-          window.concurrencyManager.reset();
-          await window.logger.info('Concurrency', '并发控制器已重置');
-          sendResponse({ success: true });
-          break;
-
-        case 'exportProgress':
-          const progress = await window.imageManager.exportProgress();
-          sendResponse({ success: true, progress });
-          break;
-
-        case 'importProgress':
-          if (request.progressData) {
-            const imported = await window.imageManager.importProgress(request.progressData);
-            await updateImageStats();
-            sendResponse({ success: true, imported });
-          } else {
-            sendResponse({ success: false, error: '缺少进度数据' });
-          }
-          break;
-
-        default:
-          sendResponse({ success: false, error: '未知操作' });
-      }
-    } catch (error) {
-      await window.logger.error('Message', '处理消息失败', error);
-      sendResponse({ success: false, error: error.message });
-    }
-  })();
+  if (await hidevideo()) { //删除4k视频
+    console.log('✅ 删除4k视频成功');
+  } else {
+    console.log('⚠️ 删除4k视频失败');
+    return false;
+  }
 
   return true;
-});
+
+}
+
+async function autoRunway() {
+  while (true) {
+
+    const isok = await runOnce();
+    if (isok) {
+      console.log('✅ 一次运行成功');
+    } else {
+      console.log('⚠️ 一次运行失败,刷新页面');
+      await awaitseconds(3);
+      //location.reload();
+    }
+    await awaitseconds(3);
+  }
+}
