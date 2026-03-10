@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Autorunway",
+  "version": "2.0.0",
+  "description": "Runway 视频生成自动化工具 - 独立版本",
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://app.runwayml.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Autorunway 设置",
+    "default_icon": {
+      "16": "icon.svg",
+      "48": "icon.svg",
+      "128": "icon.svg"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app.runwayml.com/video-tools/*"
+      ],
+      "js": [
+        "jquery-3.7.1.min.js",
+        "Logger.js",
+        "ConfigManager.js",
+        "ImageManager.js",
+        "ConcurrencyManager.js",
+        "contents.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
