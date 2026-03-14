@@ -259,6 +259,7 @@ version = "1.0.0"
 dependencies = [
  "base64 0.21.7",
  "chrono",
+ "futures-util",
  "image",
  "rfd 0.14.1",
  "serde",
@@ -270,6 +271,8 @@ dependencies = [
  "tauri-plugin-http",
  "tauri-plugin-shell",
  "tokio",
+ "tokio-tungstenite",
+ "url",
  "walkdir",
  "warp",
 ]

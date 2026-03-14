@@ -634,11 +634,13 @@ async function autoRunway() {
     const isok = await runOnce();
     if (isok) {
       console.log('✅ 一次运行成功');
+      await awaitseconds(3);
     } else {
       console.log('⚠️ 一次运行失败,刷新页面');
       await awaitseconds(3);
-      //location.reload();
+
     }
-    await awaitseconds(3);
+
+    location.reload();
   }
 }

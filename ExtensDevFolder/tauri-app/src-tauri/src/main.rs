@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::process::Command;
 use tauri::{State, Manager, Runtime, Emitter};
 use warp::Filter;
 use image::io::Reader as ImageReader;
@@ -11,6 +12,10 @@ use base64::Engine as _;
 use walkdir::WalkDir;
 use std::io::Cursor;
 use chrono::Local;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use futures_util::{SinkExt, StreamExt};
+use url::Url;
+use serde_json::json;
 
 #[derive(Clone)]
 struct AppState {
@@ -29,6 +34,115 @@ struct ImageInfo {
 
 fn now() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string()
+}
+
+async fn check_chrome_for_runway() -> Result<bool, String> {
+    let chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    let debug_port = "9222";
+    let user_data_dir = "/Users/liwentao/ChromeDev";
+    
+    let ws_url = format!("ws://localhost:{}/json", debug_port);
+    let url = Url::parse(&ws_url).map_err(|e| e.to_string())?;
+    
+    match connect_async(url).await {
+        Ok((ws_stream, _)) => {
+            let (mut write, mut read) = ws_stream.split();
+            
+            let get_pages_msg = Message::Text(r#"{"id":1,"method":"Target.getTargets"}"#.to_string());
+            write.send(get_pages_msg).await.map_err(|e| e.to_string())?;
+            
+            if let Some(msg) = read.next().await {
+                let response = msg.map_err(|e| e.to_string())?;
+                if let Some(text) = response.to_text().ok() {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
+                        let targets = parsed["result"]["targetInfos"].as_array();
+                        if let Some(targets) = targets {
+                            for target in targets {
+                                let url = target["url"].as_str().unwrap_or("");
+                                if url.contains("app.runwayml.com/video-tools") {
+                                    println!("[{}] [Chrome] 检测到 runway 页面: {}", now(), url);
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(false)
+        }
+        Err(e) => {
+            println!("[{}] [Chrome] 连接 CDP 失败: {}", now(), e);
+            Err(e.to_string())
+        }
+    }
+}
+
+async fn open_runway_page(debug_port: &str, user_data_dir: &str) -> Result<(), String> {
+    let url = "https://app.runwayml.com/video-tools/teams/54875915";
+    
+    let script = format!(r#"
+        tell application "Google Chrome"
+            activate
+            delay 0.5
+            make new window with properties {{}}
+            delay 0.3
+            tell active tab of window 1
+                open location "{}", false
+            end tell
+        end tell
+    "#, url);
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        println!("[{}] [Chrome] 已打开 runway 页面", now());
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr);
+        Err(err.to_string())
+    }
+}
+
+#[tauri::command]
+async fn check_and_open_runway(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let auto_run = {
+        let guard = state.auto_run.lock().unwrap();
+        *guard
+    };
+    
+    if !auto_run {
+        return Ok(json!({"success": false, "message": "自动运行未开启"}));
+    }
+    
+    let has_unsent = {
+        let images = state.images.lock().unwrap();
+        images.values().any(|info| !info.sent)
+    };
+    
+    if !has_unsent {
+        return Ok(json!({"success": false, "message": "没有未发送的图片"}));
+    }
+    
+    println!("[{}] [任务] 自动运行已开启，检查 Chrome 中的 runway 页面", now());
+    
+    match check_chrome_for_runway().await {
+        Ok(true) => {
+            println!("[{}] [任务] runway 页面已打开", now());
+            Ok(json!({"success": true, "message": "runway 页面已打开"}))
+        }
+        Ok(false) => {
+            println!("[{}] [任务] runway 页面未打开，正在打开...", now());
+            match open_runway_page("9222", "/Users/liwentao/ChromeDev").await {
+                Ok(_) => Ok(json!({"success": true, "message": "已打开 runway 页面"})),
+                Err(e) => Ok(json!({"success": false, "message": e}))
+            }
+        }
+        Err(e) => Ok(json!({"success": false, "message": e}))
+    }
 }
 
 #[tauri::command]
@@ -263,12 +377,48 @@ fn main() {
             folder_path: Arc::new(Mutex::new(None)),
             app_handle: Arc::new(Mutex::new(None)),
         })
-        .invoke_handler(tauri::generate_handler![open_folder, set_auto_run, set_auto_close, test_api])
+        .invoke_handler(tauri::generate_handler![open_folder, set_auto_run, set_auto_close, test_api, check_and_open_runway])
         .setup(|app| {
             println!("[{}] [应用] 初始化完成，启动HTTP服务器", now());
             let state = app.state::<AppState>().inner().clone();
             *state.app_handle.lock().unwrap() = Some(app.handle().clone());
             tauri::async_runtime::spawn(start_server(state));
+            
+            let check_state = app.state::<AppState>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    
+                    let (auto_run, has_unsent) = {
+                        let auto_run = *check_state.auto_run.lock().unwrap();
+                        if !auto_run {
+                            continue;
+                        }
+                        let images = check_state.images.lock().unwrap();
+                        let has_unsent = images.values().any(|info| !info.sent);
+                        (auto_run, has_unsent)
+                    };
+                    
+                    if !has_unsent {
+                        continue;
+                    }
+                    
+                    println!("[{}] [任务] 定时检查 runway 页面", now());
+                    match check_chrome_for_runway().await {
+                        Ok(true) => {
+                            println!("[{}] [任务] runway 页面已打开", now());
+                        }
+                        Ok(false) => {
+                            println!("[{}] [任务] runway 页面未打开，正在打开...", now());
+                            let _ = open_runway_page("9222", "/Users/liwentao/ChromeDev").await;
+                        }
+                        Err(e) => {
+                            println!("[{}] [任务] 检查失败: {}", now(), e);
+                        }
+                    }
+                }
+            });
+            
             Ok(())
         })
         .run(tauri::generate_context!())
