@@ -2,7 +2,7 @@
 
 通过 CDP (Chrome DevTools Protocol) 协议控制 Chrome 浏览器的 MCP 服务器。让 IDE AI 能够完全控制 Chrome 浏览器、获取页面内容、执行 JavaScript、监控页面变化和管理 Chrome 扩展。
 
-[English](README.md) | [中文文档](README.zh.md)
+[English](README.md) | [中文](README.zh.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md) | [Português](README.pt.md)
 
 ## 前置要求
 

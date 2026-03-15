@@ -2,7 +2,7 @@
 
 MCP server for Chrome browser control via CDP. Enables IDE AI to fully control Chrome browser, get page content, execute JavaScript, monitor page changes, and manage Chrome extensions.
 
-[中文文档](README.zh.md) | [English](README.md)
+[English](README.md) | [中文](README.zh.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md) | [Português](README.pt.md)
 
 ## Prerequisites
 
