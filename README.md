@@ -1,412 +1,280 @@
-# ChromeDev Assistant - Chrome插件开发辅助工具
+# Chrome Browser MCP
 
-通过 MCP 协议让 IDE AI 充分理解网页，实现智能化的 Chrome 插件开发体验。
+A Model Context Protocol (MCP) server for controlling Chrome browser via Chrome DevTools Protocol (CDP). Enables IDE AI to fully understand web pages, execute JavaScript, monitor page changes, and manage Chrome extensions.
 
-## 🎯 核心价值
+[English](README.md) | [中文](README.zh.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Русский](README.ru.md) | [Português](README.pt.md)
 
-- **网页理解**: AI 可以完整理解目标网页的 DOM 结构、JS 逻辑、网络请求
-- **实时调试**: 在 IDE 中直接执行代码并观察浏览器变化
-- **自动化测试**: 自动运行测试用例，验证插件功能
-- **智能开发**: 配合 exten-coder 智能体，实现"理解网页 → 生成代码 → 自动测试 → 验证效果"的闭环
+## 🎯 Core Features
 
-## 🚀 快速开始
+- **Web Page Understanding**: AI can fully comprehend DOM structure, JavaScript logic, and network requests
+- **Real-time Debugging**: Execute code directly in IDE and observe browser changes
+- **Automated Testing**: Run test cases automatically to verify extension functionality
+- **Smart Development**: Work with exten-coder agent to achieve "Understand → Develop → Test → Verify" workflow
 
-### 前置要求
+## 📁 Project Structure
+
+```
+extenDevTools/
+├── README.md                             # This file (English)
+├── README.zh.md                          # Chinese documentation
+├── skill.md                              # Skill usage documentation
+├── skill.zh.md                           # Skill usage (Chinese)
+├── exten-coder-agent-prompt.md           # exten-coder agent prompt
+├── exten-coder-invoke-guide.md           # exten-coder invocation guide
+└── chrome-browser-mcp/                   # MCP Server implementation
+    ├── README.md                         # MCP Server documentation
+    ├── package.json                      # Project configuration
+    ├── tsconfig.json                     # TypeScript configuration
+    └── src/                              # Source code
+        ├── index.ts                      # MCP Server entry
+        ├── cdp-manager.ts                # CDP connection management
+        ├── browser-controller.ts         # Browser control
+        └── js-tester.ts                  # JS testing & extension management
+```
+
+## 🚀 Quick Start
+
+### Prerequisites
 
 - Node.js 18+
-- Chrome 浏览器
-- Trae IDE（或其他支持 MCP 的 IDE）
+- Chrome browser (with remote debugging support)
+- Trae IDE (or other MCP-compatible IDE)
 
-### 一键启动
+### 1. Start Chrome Browser (Remote Debugging Mode)
 
+**macOS:**
 ```bash
-./start.sh
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir="/Users/$(whoami)/ChromeDev"
 ```
 
-启动脚本会自动：
-1. ✅ 安装依赖（首次运行）
-2. ✅ 启动 Native Bridge 服务
-3. ✅ 检查服务健康状态
-4. ✅ 显示配置说明
+**Windows:**
+```cmd
+"C:\Program Files\Google\Chrome\Application\chrome.exe" ^
+  --remote-debugging-port=9222 ^
+  --user-data-dir="%USERPROFILE%\ChromeDev"
+```
 
-### 手动启动步骤
+**Linux:**
+```bash
+google-chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/ChromeDev"
+```
 
-#### 1. 安装依赖
+### 2. Install MCP Server
 
 ```bash
-cd extDevToolServer/native-bridge
+cd chrome-browser-mcp
 npm install
-
-cd ../mcp-server
-npm install
+npm run build
 ```
 
-#### 2. 启动 Native Bridge
+### 3. Configure MCP Client
 
-```bash
-cd extDevToolServer/native-bridge
-npm start
-```
-
-服务运行在 `http://localhost:8080`
-
-#### 3. 加载 Chrome 扩展
-
-1. 打开 Chrome 浏览器
-2. 访问 `chrome://extensions/`
-3. 开启"开发者模式"
-4. 点击"加载已解压的扩展程序"
-5. 选择 `extDevToolServer/extension` 目录
-6. 复制扩展 ID（后续配置需要）
-
-#### 4. 配置 Native Messaging
-
-编辑配置文件：
-```bash
-vim ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.chromedev.assistant.json
-```
-
-将 `YOUR_EXTENSION_ID_HERE` 替换为实际的扩展 ID。
-
-#### 5. 配置 IDE MCP
-
-在 Trae IDE 中添加 MCP Server 配置：
+Add to your MCP client configuration:
 
 ```json
 {
   "mcpServers": {
-    "ChromeDev Assistant": {
+    "chrome-browser": {
       "command": "node",
-      "args": ["/Volumes/workspace/codespace/extenDevTools/extDevToolServer/mcp-server/dist/index.js"]
+      "args": ["/path/to/extenDevTools/chrome-browser-mcp/dist/index.js"],
+      "env": {
+        "CHROME_HOST": "localhost",
+        "CHROME_PORT": "9222"
+      }
     }
   }
 }
 ```
 
-## 💡 使用方式
-
-### 方式一：配合 exten-coder 智能体（推荐）
-
-#### 1. 配置智能体
-
-在 Trae IDE 中创建 exten-coder 智能体：
-- 系统提示词：使用 [extDevToolServer/exten-coder-agent-prompt.md](extDevToolServer/exten-coder-agent-prompt.md)
-- MCP 工具：ChromeDev Assistant + Chrome DevTools MCP
-
-#### 2. 开发插件
-
-**创建新插件**：
-```
-用户：帮我开发一个自动填充表单的Chrome扩展
-
-智能体会：
-1. 使用 ChromeDev Assistant 采集目标页面数据
-2. 分析表单结构和字段
-3. 在 ExtensDevFolder 下创建新项目
-4. 生成完整的插件代码
-5. 使用 MCP 工具自动测试功能
-```
-
-**调试问题**：
-```
-用户：我的插件注入失败，帮我排查
-
-智能体会：
-1. 使用 Chrome DevTools MCP 查看 Console 日志
-2. 使用 ChromeDev Assistant 执行调试脚本
-3. 定位问题原因
-4. 提供修复方案
-5. 验证修复效果
-```
-
-**性能优化**：
-```
-用户：优化我的插件性能
-
-智能体会：
-1. 使用 Chrome DevTools MCP 进行 Lighthouse 审计
-2. 分析网络请求和 DOM 操作
-3. 提供优化建议
-4. 实施优化方案
-5. 验证优化效果
-```
-
-### 方式二：直接使用 MCP 工具
-
-在 IDE 中直接调用 MCP 工具：
-
-#### collectPageData - 采集页面数据
+Or use npx (after publishing to npm):
 
 ```json
 {
-  "tabId": 0,
-  "includeDOM": true,
-  "includeConsole": true,
-  "includeStorage": true,
-  "screenshot": false
+  "mcpServers": {
+    "chrome-browser": {
+      "command": "npx",
+      "args": ["-y", "chrome-browser-mcp"],
+      "env": {
+        "CHROME_HOST": "localhost",
+        "CHROME_PORT": "9222"
+      }
+    }
+  }
 }
 ```
 
-**用途**：
-- 分析目标网页的 DOM 结构
-- 查看页面存储的数据
-- 获取 Console 日志
-- 了解页面的网络请求
+## 🔧 Available Tools
 
-#### executeScript - 执行 JavaScript
+### Connection Management
 
-```json
-{
-  "tabId": 0,
-  "code": "document.querySelectorAll('form').length",
-  "captureConsole": true,
-  "timeout": 30000
-}
-```
+| Tool | Description |
+|------|-------------|
+| `browser_connect` | Connect to running Chrome browser |
+| `browser_disconnect` | Disconnect from browser |
+| `browser_status` | Get browser connection status |
 
-**用途**：
-- 测试插件功能
-- 调试页面交互
-- 验证 DOM 操作
-- 收集页面数据
+### Page Management
 
-#### getConsoleLogs - 获取 Console 日志
+| Tool | Description |
+|------|-------------|
+| `page_list` | List all open pages |
+| `page_open` | Open new page |
+| `page_attach` | Attach to specific page |
+| `page_close` | Close current page |
+| `page_navigate` | Navigate to URL |
+| `page_back` | Go back |
+| `page_forward` | Go forward |
+| `page_reload` | Reload page |
 
-```json
-{
-  "tabId": 0
-}
-```
+### Page Content
 
-**用途**：
-- 查看页面错误信息
-- 监控插件输出
-- 调试问题
+| Tool | Description |
+|------|-------------|
+| `page_get_html` | Get page HTML |
+| `page_get_text` | Get page text content |
+| `page_get_snapshot` | Get full page snapshot (HTML, text, DOM structure) |
+| `page_query_selector` | Query single element |
+| `page_query_selector_all` | Query all matching elements |
 
-#### captureScreenshot - 页面截图
+### Screenshot & Viewport
 
-```json
-{
-  "tabId": 0
-}
-```
+| Tool | Description |
+|------|-------------|
+| `page_screenshot` | Capture page screenshot |
+| `page_set_viewport` | Set viewport size |
 
-**用途**：
-- 记录页面状态
-- 验证 UI 效果
-- 生成文档素材
+### JavaScript Execution
 
-#### navigate - 页面导航
+| Tool | Description |
+|------|-------------|
+| `js_execute` | Execute JavaScript code in page |
+| `js_run_tests` | Run test code (supports describe/it/expect syntax) |
+| `js_inject_script` | Inject external script |
+| `js_inject_styles` | Inject CSS styles |
+| `js_get_globals` | Get page global variables |
 
-```json
-{
-  "tabId": 0,
-  "url": "https://example.com"
-}
-```
+### Monitoring
 
-**用途**：
-- 测试多页面场景
-- 自动化测试流程
+| Tool | Description |
+|------|-------------|
+| `monitor_console` | Get console messages |
+| `monitor_network` | Get network request logs |
 
-#### reload - 重新加载页面
+### Extension Management
 
-```json
-{
-  "tabId": 0,
-  "bypassCache": false
-}
-```
+| Tool | Description |
+|------|-------------|
+| `extension_list` | List installed extensions |
+| `extension_get_info` | Get extension details |
+| `extension_enable` | Enable extension |
+| `extension_disable` | Disable extension |
+| `extension_reload` | Reload extension |
+| `extension_execute` | Execute code in extension context |
+| `extension_get_storage` | Get extension storage data |
+| `extension_set_storage` | Set extension storage data |
 
-**用途**：
-- 刷新页面状态
-- 测试插件重新加载
+### Session Management
 
-#### ping - 测试连接
+| Tool | Description |
+|------|-------------|
+| `session_set` | Set current active session |
+| `session_list` | List all active sessions |
 
-```json
-{}
-```
+## 💡 Usage Examples
 
-**用途**：
-- 验证 MCP 服务是否正常
-- 检查扩展是否加载
-
-## 📁 项目结构
+### Example 1: Open Page and Get Content
 
 ```
-extenDevTools/
-├── start.sh                              # 一键启动脚本
-├── README.md                             # 本文件
-├── ExtensDevFolder/                      # 插件开发工作区
-│   └── your-plugin-project/              # 你的插件项目
-└── extDevToolServer/                     # 服务器代码
-    ├── extension/                        # Chrome 扩展
-    │   ├── manifest.json                # 扩展清单
-    │   ├── background.js                # Service Worker
-    │   ├── content.js                   # 内容脚本
-    │   ├── native-messaging.js          # Native Messaging
-    │   ├── page-inspector.js            # 页面采集器
-    │   └── script-executor.js           # 脚本执行器
-    ├── mcp-server/                       # MCP Server
-    │   ├── src/index.ts                 # 主程序
-    │   └── dist/                        # 编译输出
-    ├── native-bridge/                    # Native Messaging 桥接
-    │   ├── src/index.ts                 # HTTP Server
-    │   └── dist/                        # 编译输出
-    ├── scripts/                          # 工具脚本
-    │   └── install.sh                   # 安装脚本
-    ├── README.md                        # 服务器文档
-    ├── DOCUMENTATION.md                 # 文档结构说明
-    ├── product-spec.md                  # 产品规格
-    ├── exten-coder-agent-prompt.md      # 智能体提示词
-    └── exten-coder-invoke-guide.md      # 智能体调用指南
+1. browser_connect
+2. page_open {"url": "https://example.com"}
+3. page_get_snapshot {"includeScreenshot": false}
+4. page_close
+5. browser_disconnect
 ```
 
-## 🎓 使用场景
-
-### 场景1：开发新插件
+### Example 2: Execute JavaScript Test
 
 ```
-1. 用户：我想开发一个自动填充登录表单的插件
-2. 智能体：使用 ChromeDev Assistant 采集目标登录页面
-3. 智能体：分析表单字段和验证逻辑
-4. 智能体：在 ExtensDevFolder 创建新项目
-5. 智能体：生成 manifest.json、content script、popup 等文件
-6. 智能体：使用 Chrome DevTools MCP 测试填充功能
-7. 智能体：验证功能是否正常
+1. browser_connect
+2. page_open {"url": "https://example.com"}
+3. js_run_tests {"testCode": "describe('Page', () => {\n  it('should have title', () => {\n    expect(document.title).toBeTruthy();\n  });\n});"}
+4. page_close
+5. browser_disconnect
 ```
 
-### 场景2：调试现有插件
+### Example 3: Test Chrome Extension
 
 ```
-1. 用户：我的插件在某些页面不工作
-2. 智能体：使用 Chrome DevTools MCP 查看 Console 错误
-3. 智能体：使用 ChromeDev Assistant 采集问题页面数据
-4. 智能体：分析 DOM 结构差异
-5. 智能体：定位问题并提供修复方案
-6. 智能体：使用 MCP 工具验证修复效果
+1. browser_connect
+2. page_open {"url": "chrome://extensions"}
+3. extension_list {}
+4. extension_get_storage {"extensionId": "xxx"}
+5. extension_reload {"extensionId": "xxx"}
+6. page_close
+7. browser_disconnect
 ```
 
-### 场景3：优化插件性能
+## 🎓 Typical Workflows
+
+### Web Page Testing Workflow
 
 ```
-1. 用户：优化我的插件性能
-2. 智能体：使用 Chrome DevTools MCP 进行 Lighthouse 审计
-3. 智能体：分析网络请求和资源加载
-4. 智能体：检查 DOM 操作频率
-5. 智能体：提供优化建议（懒加载、事件委托等）
-6. 智能体：实施优化方案
-7. 智能体：验证性能提升效果
+browser_connect
+    ↓
+page_open (target page)
+    ↓
+js_execute (inject test code)
+    ↓
+js_run_tests (run tests)
+    ↓
+monitor_console (check console)
+    ↓
+page_close
+    ↓
+browser_disconnect
 ```
 
-### 场景4：自动化测试
+### Extension Debugging Workflow
 
 ```
-1. 用户：帮我测试插件的表单提交功能
-2. 智能体：使用 Chrome DevTools MCP 导航到目标页面
-3. 智能体：使用 executeScript 填充表单
-4. 智能体：模拟点击提交按钮
-5. 智能体：使用 ChromeDev Assistant 验证提交结果
-6. 智能体：生成测试报告
+browser_connect
+    ↓
+page_open (test page)
+    ↓
+extension_list (get extension list)
+    ↓
+extension_execute (execute extension code)
+    ↓
+extension_get_storage (check storage)
+    ↓
+page_close
+    ↓
+browser_disconnect
 ```
 
-## 🔧 故障排查
+## 🛠️ Tech Stack
 
-### 服务启动失败
+- **Chrome DevTools Protocol**: Control browser via CDP
+- **MCP Protocol**: Model Context Protocol implementation
+- **TypeScript**: Type-safe development
+- **Node.js 18+**: Runtime environment
 
-**症状**：`./start.sh` 执行失败
+## 📚 Documentation
 
-**排查步骤**：
-1. 检查 Node.js 版本：`node --version`（需要 18+）
-2. 检查端口占用：`lsof -i :8080`
-3. 查看详细错误：`cd extDevToolServer/native-bridge && npm start`
-4. 重新安装依赖：`rm -rf node_modules && npm install`
+- [skill.md](skill.md) - Skill usage documentation
+- [exten-coder-agent-prompt.md](exten-coder-agent-prompt.md) - exten-coder agent prompt
+- [exten-coder-invoke-guide.md](exten-coder-invoke-guide.md) - exten-coder invocation guide
+- [chrome-browser-mcp/README.md](chrome-browser-mcp/README.md) - MCP Server documentation
+- [README.zh.md](README.zh.md) - 中文文档
 
-### Chrome 扩展无法连接
-
-**症状**：MCP 工具调用失败
-
-**排查步骤**：
-1. 确认扩展已加载：访问 `chrome://extensions/`
-2. 检查扩展 ID 是否正确
-3. 验证 Native Messaging 配置：
-   ```bash
-   cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.chromedev.assistant.json
-   ```
-4. 查看 Chrome 控制台日志：扩展详情 → 查看 Service Worker
-
-### MCP Server 无响应
-
-**症状**：IDE 中调用工具超时
-
-**排查步骤**：
-1. 检查 Native Bridge 是否运行：
-   ```bash
-   curl http://localhost:8080/health
-   ```
-2. 验证 MCP Server 路径是否正确
-3. 查看 MCP Server 日志输出
-4. 重启服务：`./start.sh`
-
-### 页面数据采集失败
-
-**症状**：collectPageData 返回空数据
-
-**排查步骤**：
-1. 确认当前标签页已加载完成
-2. 检查扩展权限设置
-3. 查看 Chrome DevTools Console 是否有错误
-4. 尝试刷新页面后重新采集
-
-## 📚 更多文档
-
-### 核心文档
-- [服务器 README](extDevToolServer/README.md) - 服务器详细文档
-- [产品规格](extDevToolServer/product-spec.md) - 功能设计和架构
-- [文档结构](extDevToolServer/DOCUMENTATION.md) - 文档导航
-
-### 智能体文档
-- [exten-coder 提示词](extDevToolServer/exten-coder-agent-prompt.md) - 智能体系统提示词
-- [智能体调用指南](extDevToolServer/exten-coder-invoke-guide.md) - 何时调用智能体
-
-## 🛠️ 技术栈
-
-- **Chrome Extension**: Manifest V3
-- **MCP Server**: TypeScript + @modelcontextprotocol/sdk
-- **通信协议**: Native Messaging / HTTP Bridge
-- **运行环境**: Node.js 18+
-
-## 🤝 配合 exten-coder 智能体
-
-本工具设计为与 exten-coder 智能体配合使用，实现智能化的插件开发流程：
-
-1. **智能体配置**：使用提供的提示词创建智能体
-2. **MCP 工具**：智能体自动调用 ChromeDev Assistant 和 Chrome DevTools MCP
-3. **自动化流程**：智能体实现"理解→开发→测试→验证"的闭环
-4. **项目规范**：智能体遵循 ExtensDevFolder 目录结构规范
-
-## 📝 许可证
+## 📄 License
 
 MIT
 
-## 🙋 常见问题
-
-**Q: 这个工具适合谁使用？**
-A: 适合需要开发 Chrome 插件的开发者，特别是希望借助 AI 提升开发效率的用户。
-
-**Q: 必须使用 exten-coder 智能体吗？**
-A: 不是必须的。你可以直接在 IDE 中调用 MCP 工具，但配合智能体会获得更好的体验。
-
-**Q: 支持哪些浏览器？**
-A: 目前仅支持 Chrome 浏览器（Chromium 内核）。
-
-**Q: 插件开发项目放在哪里？**
-A: 所有插件项目都应该放在 `ExtensDevFolder` 目录下，每个子目录是一个独立的插件项目。
-
-**Q: 如何更新工具？**
-A: 拉取最新代码后，重新运行 `./start.sh` 即可。
-
 ---
 
-**开始你的智能插件开发之旅吧！** 🚀
+**Start your smart extension development journey!** 🚀

@@ -1,0 +1,28 @@
+# Source files
+src/
+tsconfig.json
+
+# Development
+node_modules/
+*.log
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+coverage/
+*.test.ts
+*.spec.ts
+
+# Build artifacts (keep dist/)
+# dist/ is included via files field in package.json
+
+# Misc
+.DS_Store
+*.md
+!README.md
