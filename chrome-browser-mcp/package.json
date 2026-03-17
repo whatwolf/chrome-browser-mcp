@@ -1,6 +1,6 @@
 {
   "name": "chrome-browser-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for Chrome browser control via CDP - 通过 MCP 协议控制 Chrome 浏览器",
   "main": "dist/index.js",
   "type": "module",
