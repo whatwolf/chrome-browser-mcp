@@ -42,6 +42,18 @@ extenDevTools/
 
 ### 1. 启动 Chrome 浏览器（远程调试模式）
 
+#### 方式一：Chrome 146+ 官方开关（推荐）
+
+从 **Chrome 146+** 开始，可以通过内置开关启用远程调试，无需命令行：
+
+1. 在 Chrome 地址栏输入：`chrome://inspect/#remote-debugging`
+2. 打开 **Remote debugging** 开关
+3. Chrome 将自动监听 `localhost:9222` 调试端口
+
+这种方式与命令行启动效果完全相同，AI Agent 可以直接连接。
+
+#### 方式二：命令行启动
+
 **macOS:**
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
@@ -262,6 +274,62 @@ browser_disconnect
 - **MCP Protocol**: Model Context Protocol 实现
 - **TypeScript**: 类型安全的开发语言
 - **Node.js 18+**: 运行时环境
+
+## 🔄 与官方 Chrome DevTools MCP 的对比
+
+### 官方 chrome-devtools-mcp
+
+Google 官方推出的 MCP 服务器，支持 `--autoConnect` 自动连接功能：
+
+| 特性 | 说明 |
+|------|------|
+| `--autoConnect` | 自动连接已开启远程调试的 Chrome |
+| 性能分析 | 支持 performance 追踪、Lighthouse 审计 |
+| 输入自动化 | 点击、拖拽、填表、按键等 |
+| 官方维护 | Google 团队持续更新 |
+
+**配置示例：**
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
+    }
+  }
+}
+```
+
+### chrome-browser-mcp（本项目）
+
+你的 MCP 服务在以下场景有独特优势：
+
+| 特性 | 说明 |
+|------|------|
+| **扩展管理** | ✅ 支持启用/禁用/重载扩展、操作存储 |
+| **JS 测试框架** | ✅ 支持 describe/it/expect 语法 |
+| **会话管理** | ✅ 支持多会话切换 |
+| **轻量级** | 依赖少，安装简单 |
+
+### 如何选择
+
+| 使用场景 | 推荐方案 |
+|---------|---------|
+| 日常浏览器控制 | 官方 `chrome-devtools-mcp` |
+| Chrome 扩展开发 | `chrome-browser-mcp`（本项目） |
+| 需要 JS 测试能力 | `chrome-browser-mcp`（本项目） |
+| 需要性能分析 | 官方 `chrome-devtools-mcp` |
+
+### 连接方式对比
+
+两种方案都需要先开启 Chrome 远程调试：
+
+| Chrome 版本 | 开启方式 |
+|------------|---------|
+| Chrome 146+ | `chrome://inspect/#remote-debugging` 开关 |
+| 旧版本 | 命令行 `--remote-debugging-port=9222` |
+
+开启后，两个 MCP 服务都能连接到 `localhost:9222`。
 
 ## 📝 相关文档
 

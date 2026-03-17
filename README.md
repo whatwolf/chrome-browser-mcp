@@ -42,6 +42,16 @@ extenDevTools/
 
 ### 1. Start Chrome Browser (Remote Debugging Mode)
 
+#### Method 1: Chrome 146+ Official Switch (Recommended)
+
+Starting from **Chrome 146+**, you can enable remote debugging via built-in switch without command line:
+
+1. Open in Chrome address bar: `chrome://inspect/#remote-debugging`
+2. Turn on **Remote debugging** switch
+3. Chrome will automatically listen on `localhost:9222` debugging port
+
+#### Method 2: Command Line
+
 **macOS:**
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
@@ -262,6 +272,62 @@ browser_disconnect
 - **MCP Protocol**: Model Context Protocol implementation
 - **TypeScript**: Type-safe development
 - **Node.js 18+**: Runtime environment
+
+## 🔄 Comparison with Official Chrome DevTools MCP
+
+### Official chrome-devtools-mcp
+
+Google's official MCP server with `--autoConnect` auto-connection feature:
+
+| Feature | Description |
+|---------|-------------|
+| `--autoConnect` | Auto-connect to Chrome with remote debugging enabled |
+| Performance Analysis | Supports performance tracing, Lighthouse auditing |
+| Input Automation | Click, drag, fill forms, keyboard input, etc. |
+| Official Support | Maintained by Google team |
+
+**Config Example:**
+```json
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
+    }
+  }
+}
+```
+
+### chrome-browser-mcp (This Project)
+
+This project has unique advantages in the following scenarios:
+
+| Feature | Description |
+|---------|-------------|
+| **Extension Management** | ✅ Enable/disable/reload extensions, manage storage |
+| **JS Testing Framework** | ✅ Supports describe/it/expect syntax |
+| **Session Management** | ✅ Supports multi-session switching |
+| **Lightweight** | Fewer dependencies, easy installation |
+
+### How to Choose
+
+| Use Case | Recommended |
+|----------|-------------|
+| Daily browser control | Official `chrome-devtools-mcp` |
+| Chrome extension development | `chrome-browser-mcp` (this project) |
+| Need JS testing capability | `chrome-browser-mcp` (this project) |
+| Need performance analysis | Official `chrome-devtools-mcp` |
+
+### Connection Methods
+
+Both solutions require enabling Chrome remote debugging:
+
+| Chrome Version | How to Enable |
+|---------------|---------------|
+| Chrome 146+ | `chrome://inspect/#remote-debugging` switch |
+| Older versions | Command line `--remote-debugging-port=9222` |
+
+Once enabled, both MCP servers can connect to `localhost:9222`.
 
 ## 📚 Documentation
 
